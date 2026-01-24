@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import Link from 'next/link'
+import ConfirmModal from '@/components/ConfirmModal'
+import { EditIcon, TrashIcon } from '@/components/Icons'
 
 export default function Home() {
   const [playlists, setPlaylists] = useState([])
@@ -10,6 +12,11 @@ export default function Home() {
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [editName, setEditName] = useState('')
+  const [updating, setUpdating] = useState(false)
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, playlist: null })
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchPlaylists()
@@ -99,6 +106,57 @@ export default function Home() {
     setCreating(false)
   }
 
+  function startEdit(playlist) {
+    setEditingId(playlist.id)
+    setEditName(playlist.name)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditName('')
+  }
+
+  async function updatePlaylist(e, playlistId) {
+    e.preventDefault()
+    if (!editName.trim()) return
+
+    setUpdating(true)
+    const { error } = await supabase
+      .from('playlists')
+      .update({ name: editName.trim() })
+      .eq('id', playlistId)
+
+    if (!error) {
+      cancelEdit()
+      fetchPlaylists()
+    }
+    setUpdating(false)
+  }
+
+  function openDeleteModal(playlist) {
+    setDeleteModal({ isOpen: true, playlist })
+  }
+
+  function closeDeleteModal() {
+    setDeleteModal({ isOpen: false, playlist: null })
+  }
+
+  async function deletePlaylist() {
+    if (!deleteModal.playlist) return
+
+    setDeleting(true)
+    const { error } = await supabase
+      .from('playlists')
+      .delete()
+      .eq('id', deleteModal.playlist.id)
+
+    if (!error) {
+      fetchPlaylists()
+      closeDeleteModal()
+    }
+    setDeleting(false)
+  }
+
   return (
     <main className="min-h-screen p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
       <header className="mb-8 sm:mb-12 md:mb-16">
@@ -153,21 +211,79 @@ export default function Home() {
       ) : (
         <div className="grid gap-3 sm:gap-4">
           {playlists.map((playlist) => (
-            <Link
-              key={playlist.id}
-              href={`/${playlist.slug}`}
-              className="block p-4 sm:p-6 bg-[var(--card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group"
-            >
-              <h2 className="text-xl sm:text-2xl font-medium group-hover:text-[var(--accent)] transition-colors">
-                {playlist.name}
-              </h2>
-              <p className="text-[var(--muted)] text-sm mt-1">
-                /{playlist.slug}
-              </p>
-            </Link>
+            editingId === playlist.id ? (
+              <form
+                key={playlist.id}
+                onSubmit={(e) => updatePlaylist(e, playlist.id)}
+                className="p-4 sm:p-6 bg-[var(--card)] border border-[var(--border)]"
+              >
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 mb-3 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)]"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={updating || !editName.trim()}
+                    className="px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                  >
+                    {updating ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cancelEdit}
+                    className="px-4 py-2 border border-[var(--border)] text-[var(--muted)] hover:text-white transition-colors text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div
+                key={playlist.id}
+                className="p-4 sm:p-6 bg-[var(--card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group"
+              >
+                <Link href={`/${playlist.slug}`} className="block mb-3">
+                  <h2 className="text-xl sm:text-2xl font-medium group-hover:text-[var(--accent)] transition-colors">
+                    {playlist.name}
+                  </h2>
+                  <p className="text-[var(--muted)] text-sm mt-1">
+                    /{playlist.slug}
+                  </p>
+                </Link>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => startEdit(playlist)}
+                    className="p-2.5 sm:p-2 border border-[var(--border)] text-[var(--muted)] hover:text-white transition-colors"
+                    aria-label="Edit playlist"
+                  >
+                    <EditIcon className="w-5 h-5 sm:w-4 sm:h-4" />
+                  </button>
+                  <button
+                    onClick={() => openDeleteModal(playlist)}
+                    className="p-2.5 sm:p-2 border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                    aria-label="Delete playlist"
+                  >
+                    <TrashIcon className="w-5 h-5 sm:w-4 sm:h-4" />
+                  </button>
+                </div>
+              </div>
+            )
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={deleteModal.isOpen}
+        onClose={closeDeleteModal}
+        onConfirm={deletePlaylist}
+        title="Delete Playlist"
+        message={`Are you sure you want to delete "${deleteModal.playlist?.name}"? This will also delete all prompts and tracks in this playlist.`}
+        isDeleting={deleting}
+      />
     </main>
   )
 }
