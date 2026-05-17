@@ -41,7 +41,6 @@ export default function Home() {
   const [playerId, setPlayerId] = useState('')
   const [playerName, setPlayerName] = useState('')
   const [playerNameDraft, setPlayerNameDraft] = useState('')
-  const [editingPlayerName, setEditingPlayerName] = useState(false)
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -407,7 +406,6 @@ export default function Home() {
     writeCookie(PLAYER_NAME_COOKIE, uniqueName)
     setPlayerName(uniqueName)
     setPlayerNameDraft(uniqueName)
-    setEditingPlayerName(false)
 
     if (uniqueName !== requestedName) {
       setErrorMessage(`${requestedName} was already taken, so you are now ${uniqueName}.`)
@@ -543,39 +541,25 @@ export default function Home() {
             </p>
           </div>
 
-          <form onSubmit={savePlayerName} className="min-w-0 sm:w-72">
+          <form onSubmit={savePlayerName} className="min-w-0 sm:w-80">
             <label className="mb-2 block text-xs uppercase tracking-wide text-[var(--muted)]">Your game name</label>
-            {playerName && !editingPlayerName ? (
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1 truncate rounded-full border border-[var(--accent)] bg-[var(--background)] px-4 py-2 text-sm font-medium text-white">
-                  {playerName}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setEditingPlayerName(true); setPlayerNameDraft(playerName) }}
-                  className="px-3 py-2 text-xs text-[var(--muted)] hover:text-white"
-                >
-                  Change
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={playerNameDraft}
-                  onChange={(e) => setPlayerNameDraft(e.target.value)}
-                  placeholder="Pick a name..."
-                  className="min-w-0 flex-1 px-3 py-2 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={!playerNameDraft.trim()}
-                  className="px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                >
-                  Lock in
-                </button>
-              </div>
-            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={playerNameDraft}
+                onChange={(e) => setPlayerNameDraft(e.target.value)}
+                placeholder="Pick a name..."
+                aria-label="Your game name"
+                className="min-w-0 flex-1 rounded-full px-4 py-2 bg-[var(--background)] border border-[var(--accent)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-white text-sm"
+              />
+              <button
+                type="submit"
+                disabled={!playerNameDraft.trim() || playerNameDraft.trim() === playerName}
+                className="rounded-full px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {playerName ? 'Save' : 'Lock in'}
+              </button>
+            </div>
           </form>
         </div>
       </section>
