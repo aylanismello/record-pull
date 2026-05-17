@@ -5,25 +5,18 @@ import { supabase, supabaseConfigError } from '@/lib/supabase'
 import Link from 'next/link'
 import ConfirmModal from '@/components/ConfirmModal'
 import { EditIcon, TrashIcon } from '@/components/Icons'
-
-const PLAYER_COOKIE = 'record_pull_player_name'
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 20
-
-function readPlayerNameCookie() {
-  if (typeof document === 'undefined') return ''
-
-  const cookie = document.cookie
-    .split('; ')
-    .find(row => row.startsWith(`${PLAYER_COOKIE}=`))
-
-  return cookie ? decodeURIComponent(cookie.split('=').slice(1).join('=')) : ''
-}
-
-function writePlayerNameCookie(name) {
-  if (typeof document === 'undefined') return
-
-  document.cookie = `${PLAYER_COOKIE}=${encodeURIComponent(name)}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax`
-}
+import {
+  PLAYER_ID_COOKIE,
+  PLAYER_NAME_COOKIE,
+  collectPlayerNames,
+  createPlayerId,
+  makeUniqueDisplayName,
+  normalizePlayerName,
+  readCookie,
+  renamePlayerReferences,
+  shouldTreatVoteAsMine,
+  writeCookie
+} from '@/lib/playerIdentity'
 
 export default function Home() {
   const [playlists, setPlaylists] = useState([])
@@ -45,6 +38,7 @@ export default function Home() {
   const [voteInputs, setVoteInputs] = useState({})
   const [addingVote, setAddingVote] = useState({})
   const [trackDeleteModal, setTrackDeleteModal] = useState({ isOpen: false, track: null })
+  const [playerId, setPlayerId] = useState('')
   const [playerName, setPlayerName] = useState('')
   const [playerNameDraft, setPlayerNameDraft] = useState('')
   const [editingPlayerName, setEditingPlayerName] = useState(false)
@@ -87,9 +81,16 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    const savedName = readPlayerNameCookie()
+    let savedId = readCookie(PLAYER_ID_COOKIE)
+    if (!savedId) {
+      savedId = createPlayerId()
+      writeCookie(PLAYER_ID_COOKIE, savedId)
+    }
+
+    const savedName = readCookie(PLAYER_NAME_COOKIE)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPlayerId(savedId)
     if (savedName) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPlayerName(savedName)
       setPlayerNameDraft(savedName)
     }
@@ -236,7 +237,12 @@ export default function Home() {
 
   async function addTrack(promptId) {
     const name = trackInputs[promptId]?.trim()
+    const currentPlayerName = playerName.trim()
     if (!name || !supabase) return
+    if (!currentPlayerName || !playerId) {
+      setErrorMessage('Set your game name before adding tracks.')
+      return
+    }
 
     setAddingTrack(prev => ({ ...prev, [promptId]: true }))
     setErrorMessage(null)
@@ -245,7 +251,9 @@ export default function Home() {
       .from('playlist_tracks')
       .insert([{
         playlist_prompt_id: promptId,
-        name
+        name,
+        submitter_name: currentPlayerName,
+        submitter_player_id: playerId
       }])
 
     if (error) {
@@ -262,10 +270,10 @@ export default function Home() {
   async function addVote(track, maxVotes) {
     const pickedName = voteInputs[track.id]?.trim()
     const currentPlayerName = playerName.trim()
-    if (!pickedName || !currentPlayerName || !supabase) return
+    if (!pickedName || !currentPlayerName || !playerId || !supabase) return
 
     const currentVotes = track.track_votes?.length || 0
-    const alreadyVoted = track.track_votes?.some(vote => vote.voter_username?.toLowerCase() === currentPlayerName.toLowerCase())
+    const alreadyVoted = track.track_votes?.some(vote => shouldTreatVoteAsMine(vote, { id: playerId, displayName: currentPlayerName }))
 
     if (alreadyVoted) {
       setErrorMessage('You already placed your guess on this track. Delete your chip if you want a do-over.')
@@ -285,12 +293,16 @@ export default function Home() {
     setAddingVote(prev => ({ ...prev, [track.id]: true }))
     setErrorMessage(null)
 
+    const guessedPlayerId = findPlayerIdByName(pickedName)
+
     const { error } = await supabase
       .from('track_votes')
       .insert([{
         track_id: track.id,
         voter_name: pickedName,
-        voter_username: currentPlayerName
+        voter_username: currentPlayerName,
+        voter_player_id: playerId,
+        guessed_player_id: guessedPlayerId
       }])
 
     if (error) {
@@ -304,16 +316,103 @@ export default function Home() {
     setAddingVote(prev => ({ ...prev, [track.id]: false }))
   }
 
-  function savePlayerName(e) {
-    e.preventDefault()
-    const name = playerNameDraft.trim()
-    if (!name) return
+  function findPlayerIdByName(name) {
+    const needle = normalizePlayerName(name)
+    if (!needle) return null
 
-    writePlayerNameCookie(name)
-    setPlayerName(name)
-    setPlayerNameDraft(name)
-    setEditingPlayerName(false)
+    for (const playlist of playlists) {
+      for (const prompt of playlist.playlist_prompts || []) {
+        for (const track of prompt.playlist_tracks || []) {
+          if (track.submitter_player_id && normalizePlayerName(track.submitter_name) === needle) {
+            return track.submitter_player_id
+          }
+          for (const vote of track.track_votes || []) {
+            if (vote.voter_player_id && normalizePlayerName(vote.voter_username) === needle) {
+              return vote.voter_player_id
+            }
+            if (vote.guessed_player_id && normalizePlayerName(vote.voter_name) === needle) {
+              return vote.guessed_player_id
+            }
+          }
+        }
+      }
+    }
+
+    return null
+  }
+
+  async function savePlayerName(e) {
+    e.preventDefault()
+    const requestedName = playerNameDraft.trim()
+    if (!requestedName || !playerId) return
+
+    const uniqueName = makeUniqueDisplayName(requestedName, collectPlayerNames(playlists), playerName)
+    const changed = uniqueName !== playerName
+    const references = renamePlayerReferences(playlists, playerId, uniqueName)
+
     setErrorMessage(null)
+
+    if (supabase && changed) {
+      const updates = []
+
+      if (references.trackVoteIds.length > 0) {
+        updates.push(
+          supabase
+            .from('track_votes')
+            .update({ voter_username: uniqueName })
+            .in('id', references.trackVoteIds)
+        )
+      }
+
+      const guessedVoteIds = []
+      playlists.forEach(playlist => {
+        ;(playlist.playlist_prompts || []).forEach(prompt => {
+          ;(prompt.playlist_tracks || []).forEach(track => {
+            ;(track.track_votes || []).forEach(vote => {
+              if (vote.guessed_player_id === playerId && vote.voter_name !== uniqueName) {
+                guessedVoteIds.push(vote.id)
+              }
+            })
+          })
+        })
+      })
+
+      if (guessedVoteIds.length > 0) {
+        updates.push(
+          supabase
+            .from('track_votes')
+            .update({ voter_name: uniqueName })
+            .in('id', guessedVoteIds)
+        )
+      }
+
+      if (references.trackIds.length > 0) {
+        updates.push(
+          supabase
+            .from('playlist_tracks')
+            .update({ submitter_name: uniqueName })
+            .in('id', references.trackIds)
+        )
+      }
+
+      const results = await Promise.all(updates)
+      const failed = results.find(result => result.error)
+      if (failed) {
+        console.error('Failed to update player name references:', failed.error)
+        setErrorMessage(failed.error.message || 'Could not update your name across the game.')
+        return
+      }
+    }
+
+    writeCookie(PLAYER_NAME_COOKIE, uniqueName)
+    setPlayerName(uniqueName)
+    setPlayerNameDraft(uniqueName)
+    setEditingPlayerName(false)
+
+    if (uniqueName !== requestedName) {
+      setErrorMessage(`${requestedName} was already taken, so you are now ${uniqueName}.`)
+    }
+    fetchPlaylists()
   }
 
   async function deleteVote(voteId) {
@@ -558,7 +657,7 @@ export default function Home() {
                                 {prompt.playlist_tracks.map((track) => {
                                   const maxVotes = Math.max((prompt.playlist_tracks?.length || 0) - 1, 0)
                                   const votes = track.track_votes || []
-                                  const alreadyVoted = playerName && votes.some(vote => vote.voter_username?.toLowerCase() === playerName.toLowerCase())
+                                  const alreadyVoted = playerName && votes.some(vote => shouldTreatVoteAsMine(vote, { id: playerId, displayName: playerName }))
                                   const voteLimitReached = votes.length >= maxVotes
                                   const votingDisabled = !playerName || maxVotes === 0 || voteLimitReached || alreadyVoted
 
