@@ -35,10 +35,6 @@ export default function PlaylistPage({ params }) {
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, type: null, item: null })
   const [deleting, setDeleting] = useState(false)
 
-  useEffect(() => {
-    fetchPlaylist()
-  }, [slug])
-
   async function fetchPlaylist() {
     // Get playlist by slug
     const { data: playlistData, error: playlistError } = await supabase
@@ -68,6 +64,11 @@ export default function PlaylistPage({ params }) {
     setPrompts(promptsData || [])
     setLoading(false)
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPlaylist()
+  }, [slug])
 
   async function addPrompt(e) {
     e.preventDefault()

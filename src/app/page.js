@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabaseConfigError } from '@/lib/supabase'
 import Link from 'next/link'
 import ConfirmModal from '@/components/ConfirmModal'
 import { EditIcon, TrashIcon } from '@/components/Icons'
@@ -17,22 +17,33 @@ export default function Home() {
   const [updating, setUpdating] = useState(false)
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, playlist: null })
   const [deleting, setDeleting] = useState(false)
-
-  useEffect(() => {
-    fetchPlaylists()
-  }, [])
+  const [errorMessage, setErrorMessage] = useState(supabaseConfigError)
 
   async function fetchPlaylists() {
+    if (!supabase) {
+      setLoading(false)
+      return
+    }
+
     const { data, error } = await supabase
       .from('playlists')
       .select('*')
       .order('created_at', { ascending: false })
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to fetch playlists:', error)
+      setErrorMessage(error.message || 'Could not load playlists.')
+    } else {
+      setErrorMessage(null)
       setPlaylists(data || [])
     }
     setLoading(false)
   }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPlaylists()
+  }, [])
 
   const snobPhrases = [
     'before-they-sold-out',
@@ -89,16 +100,20 @@ export default function Home() {
 
   async function createPlaylist(e) {
     e.preventDefault()
-    if (!newName.trim()) return
+    if (!newName.trim() || !supabase) return
 
     setCreating(true)
+    setErrorMessage(null)
     const slug = await generateSlug()
 
     const { error } = await supabase
       .from('playlists')
       .insert([{ name: newName.trim(), slug }])
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to create playlist:', error)
+      setErrorMessage(error.message || 'Could not create playlist.')
+    } else {
       setNewName('')
       setShowCreate(false)
       fetchPlaylists()
@@ -201,6 +216,13 @@ export default function Home() {
           </form>
         )}
       </div>
+
+      {errorMessage && (
+        <div className="mb-6 border border-[var(--accent)] bg-[var(--card)] p-4 text-sm text-white">
+          <div className="font-medium text-[var(--accent)]">Database connection failed</div>
+          <div className="mt-1 text-[var(--muted)]">{errorMessage}</div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-[var(--muted)]">Loading...</div>
