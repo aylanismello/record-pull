@@ -26,17 +26,28 @@ CREATE TABLE playlist_tracks (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Track votes table (people who may have selected a track)
+CREATE TABLE track_votes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  track_id UUID NOT NULL REFERENCES playlist_tracks(id) ON DELETE CASCADE,
+  voter_name TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX idx_playlist_prompts_playlist_id ON playlist_prompts(playlist_id);
 CREATE INDEX idx_playlist_prompts_sort_order ON playlist_prompts(playlist_id, sort_order);
 CREATE INDEX idx_playlist_tracks_prompt_id ON playlist_tracks(playlist_prompt_id);
+CREATE INDEX idx_track_votes_track_id ON track_votes(track_id);
 
 -- Enable Row Level Security (but allow all operations since it's anonymous)
 ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;
 ALTER TABLE playlist_prompts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE playlist_tracks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE track_votes ENABLE ROW LEVEL SECURITY;
 
 -- Policies for anonymous access
 CREATE POLICY "Allow all operations on playlists" ON playlists FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on playlist_prompts" ON playlist_prompts FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on playlist_tracks" ON playlist_tracks FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on track_votes" ON track_votes FOR ALL USING (true) WITH CHECK (true);

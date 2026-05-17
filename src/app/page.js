@@ -23,6 +23,9 @@ export default function Home() {
   const [addingPrompt, setAddingPrompt] = useState({})
   const [trackInputs, setTrackInputs] = useState({})
   const [addingTrack, setAddingTrack] = useState({})
+  const [voteInputs, setVoteInputs] = useState({})
+  const [addingVote, setAddingVote] = useState({})
+  const [trackDeleteModal, setTrackDeleteModal] = useState({ isOpen: false, track: null })
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -36,7 +39,10 @@ export default function Home() {
         *,
         playlist_prompts (
           *,
-          playlist_tracks (*)
+          playlist_tracks (
+            *,
+            track_votes (*)
+          )
         )
       `)
       .order('created_at', { ascending: false })
@@ -222,22 +228,65 @@ export default function Home() {
     setAddingTrack(prev => ({ ...prev, [promptId]: false }))
   }
 
-  async function deleteTrack(trackId) {
-    if (!supabase) return
+  async function addVote(track, maxVotes) {
+    const voterName = voteInputs[track.id]?.trim()
+    if (!voterName || !supabase) return
 
+    const currentVotes = track.track_votes?.length || 0
+    if (currentVotes >= maxVotes) {
+      setErrorMessage(`This track already has the max ${maxVotes} vote${maxVotes === 1 ? '' : 's'}.`)
+      return
+    }
+
+    setAddingVote(prev => ({ ...prev, [track.id]: true }))
+    setErrorMessage(null)
+
+    const { error } = await supabase
+      .from('track_votes')
+      .insert([{
+        track_id: track.id,
+        voter_name: voterName
+      }])
+
+    if (error) {
+      console.error('Failed to add vote:', error)
+      setErrorMessage(error.message || 'Could not add vote.')
+    } else {
+      setVoteInputs(prev => ({ ...prev, [track.id]: '' }))
+      fetchPlaylists()
+    }
+
+    setAddingVote(prev => ({ ...prev, [track.id]: false }))
+  }
+
+  function openTrackDeleteModal(track) {
+    setTrackDeleteModal({ isOpen: true, track })
+  }
+
+  function closeTrackDeleteModal() {
+    setTrackDeleteModal({ isOpen: false, track: null })
+  }
+
+  async function deleteTrack() {
+    if (!trackDeleteModal.track || !supabase) return
+
+    setDeleting(true)
     setErrorMessage(null)
 
     const { error } = await supabase
       .from('playlist_tracks')
       .delete()
-      .eq('id', trackId)
+      .eq('id', trackDeleteModal.track.id)
 
     if (error) {
       console.error('Failed to delete track:', error)
       setErrorMessage(error.message || 'Could not delete track.')
     } else {
+      closeTrackDeleteModal()
       fetchPlaylists()
     }
+
+    setDeleting(false)
   }
 
   function openDeleteModal(playlist) {
@@ -382,23 +431,81 @@ export default function Home() {
                               {prompt.description}
                             </p>
                             {prompt.playlist_tracks?.length > 0 ? (
-                              <div className="mt-2 space-y-1">
-                                {prompt.playlist_tracks.map((track) => (
-                                  <div
-                                    key={track.id}
-                                    className="group/track flex items-center justify-between gap-3 border-l-2 border-[var(--accent)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--muted)]"
-                                  >
-                                    <span className="min-w-0 flex-1 break-words">{track.name}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteTrack(track.id)}
-                                      className="text-xs text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-                                      aria-label={`Delete track ${track.name}`}
+                              <div className="mt-3 space-y-3">
+                                {prompt.playlist_tracks.map((track) => {
+                                  const maxVotes = prompt.playlist_tracks.length
+                                  const votes = track.track_votes || []
+                                  const voteLimitReached = votes.length >= maxVotes
+
+                                  return (
+                                    <div
+                                      key={track.id}
+                                      className="border-l-4 border-[var(--accent)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--muted)]"
                                     >
-                                      Delete
-                                    </button>
-                                  </div>
-                                ))}
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1 text-base font-medium text-white break-words">
+                                          {track.name}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => openTrackDeleteModal(track)}
+                                          className="shrink-0 text-xs text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                                          aria-label={`Delete track ${track.name}`}
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+
+                                      <div className="mt-3">
+                                        <div className="mb-2 flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-[var(--muted)]">
+                                          <span>Who picked it?</span>
+                                          <span>{votes.length}/{maxVotes} votes</span>
+                                        </div>
+
+                                        {votes.length > 0 && (
+                                          <div className="mb-3 flex flex-wrap gap-2">
+                                            {votes.map((vote) => (
+                                              <span
+                                                key={vote.id}
+                                                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs text-white"
+                                              >
+                                                {vote.voter_name}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                          <input
+                                            type="text"
+                                            value={voteInputs[track.id] || ''}
+                                            onChange={(e) => setVoteInputs(prev => ({
+                                              ...prev,
+                                              [track.id]: e.target.value
+                                            }))}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') {
+                                                e.preventDefault()
+                                                addVote(track, maxVotes)
+                                              }
+                                            }}
+                                            placeholder={voteLimitReached ? 'Vote limit reached' : 'Vote for a person...'}
+                                            disabled={voteLimitReached}
+                                            className="flex-1 px-3 py-2 bg-[var(--card)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 text-sm"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => addVote(track, maxVotes)}
+                                            disabled={addingVote[track.id] || voteLimitReached || !voteInputs[track.id]?.trim()}
+                                            className="w-full sm:w-auto px-4 py-2 border border-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                                          >
+                                            {addingVote[track.id] ? 'Voting...' : 'Vote'}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
                               </div>
                             ) : (
                               <p className="mt-2 text-xs text-[var(--muted)]">No tracks yet.</p>
@@ -507,6 +614,15 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={trackDeleteModal.isOpen}
+        onClose={closeTrackDeleteModal}
+        onConfirm={deleteTrack}
+        title="Delete Track"
+        message={`Delete "${trackDeleteModal.track?.name}"? This will also delete all votes for this track.`}
+        isDeleting={deleting}
+      />
 
       <ConfirmModal
         isOpen={deleteModal.isOpen}
