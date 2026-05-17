@@ -5,6 +5,7 @@ import { supabase, supabaseConfigError } from '@/lib/supabase'
 import Link from 'next/link'
 import ConfirmModal from '@/components/ConfirmModal'
 import { EditIcon, TrashIcon } from '@/components/Icons'
+import { MODERATOR_COOKIE, canDeletePlaylist, canDeleteTrack, canDeleteVote, validateModeratorCode } from '@/lib/moderator'
 import {
   PLAYER_ID_COOKIE,
   PLAYER_NAME_COOKIE,
@@ -42,6 +43,9 @@ export default function Home() {
   const [playerId, setPlayerId] = useState('')
   const [playerName, setPlayerName] = useState('')
   const [playerNameDraft, setPlayerNameDraft] = useState('')
+  const [moderatorCode, setModeratorCode] = useState('')
+  const [isModerator, setIsModerator] = useState(false)
+  const [moderatorMessage, setModeratorMessage] = useState('')
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -88,8 +92,13 @@ export default function Home() {
     }
 
     const savedName = readCookie(PLAYER_NAME_COOKIE)
+    const savedModerator = readCookie(MODERATOR_COOKIE)
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPlayerId(savedId)
+    if (savedModerator === 'true') {
+      setIsModerator(true)
+      setModeratorMessage('mod mode on')
+    }
     if (savedName) {
       setPlayerName(savedName)
       setPlayerNameDraft(savedName)
@@ -429,7 +438,7 @@ export default function Home() {
   }
 
   async function deleteVote(voteId) {
-    if (!supabase) return
+    if (!supabase || !canDeleteVote({ isModerator })) return
 
     setErrorMessage(null)
 
@@ -447,6 +456,7 @@ export default function Home() {
   }
 
   function openTrackDeleteModal(track) {
+    if (!canDeleteTrack({ isModerator })) return
     setTrackDeleteModal({ isOpen: true, track })
   }
 
@@ -455,7 +465,7 @@ export default function Home() {
   }
 
   async function deleteTrack() {
-    if (!trackDeleteModal.track || !supabase) return
+    if (!trackDeleteModal.track || !supabase || !canDeleteTrack({ isModerator })) return
 
     setDeleting(true)
     setErrorMessage(null)
@@ -477,6 +487,7 @@ export default function Home() {
   }
 
   function openDeleteModal(playlist) {
+    if (!canDeletePlaylist({ isModerator })) return
     setDeleteModal({ isOpen: true, playlist })
   }
 
@@ -485,7 +496,7 @@ export default function Home() {
   }
 
   async function deletePlaylist() {
-    if (!deleteModal.playlist) return
+    if (!deleteModal.playlist || !canDeletePlaylist({ isModerator })) return
 
     setDeleting(true)
     const { error } = await supabase
@@ -500,18 +511,39 @@ export default function Home() {
     setDeleting(false)
   }
 
+  function unlockModerator(e) {
+    e.preventDefault()
+    if (validateModeratorCode(moderatorCode)) {
+      setIsModerator(true)
+      writeCookie(MODERATOR_COOKIE, 'true')
+      setModeratorCode('')
+      setModeratorMessage('mod mode on')
+      setErrorMessage(null)
+    } else {
+      setModeratorMessage('wrong code')
+    }
+  }
+
+  function lockModerator() {
+    setIsModerator(false)
+    writeCookie(MODERATOR_COOKIE, 'false')
+    setModeratorCode('')
+    setModeratorMessage('mod mode off')
+  }
+
   return (
-    <main className="min-h-screen p-4 sm:p-6 md:p-8 max-w-4xl mx-auto">
-      <header className="mb-8 sm:mb-12 md:mb-16">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-2">Record Pull</h1>
-        <p className="text-[var(--muted)] text-base sm:text-lg">Anonymous collaborative playlists</p>
+    <main className="min-h-screen overflow-hidden px-3 py-4 sm:px-6 md:px-8 max-w-5xl mx-auto">
+      <header className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.28),transparent_35%),linear-gradient(145deg,rgba(31,31,31,0.96),rgba(12,12,12,0.98))] p-5 shadow-2xl sm:mb-7 sm:p-8">
+        <div className="mb-4 inline-flex rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">party crate</div>
+        <h1 className="text-4xl font-black tracking-tight sm:text-6xl md:text-7xl">Record Pull</h1>
+        <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--muted)] sm:text-xl">Drop anonymous tracks, read the room, then guess who brought the heat. mobile-first, couch-friendly, slightly chaotic.</p>
       </header>
 
       <div className="mb-6 sm:mb-8">
         {!showCreate ? (
           <button
             onClick={() => setShowCreate(true)}
-            className="w-full sm:w-auto px-6 py-3 bg-[var(--accent)] text-white font-medium hover:opacity-90 transition-opacity"
+            className="w-full rounded-full px-6 py-4 bg-[var(--accent)] text-black font-black uppercase tracking-[0.12em] shadow-[0_14px_30px_rgba(30,215,96,0.22)] hover:scale-[1.01] transition sm:w-auto"
           >
             New Playlist
           </button>
@@ -545,7 +577,7 @@ export default function Home() {
         )}
       </div>
 
-      <section className="mb-6 border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+      <section className="mb-5 rounded-[1.5rem] border border-white/10 bg-[var(--card)]/90 p-4 shadow-xl sm:mb-6 sm:p-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">How this works</div>
@@ -577,6 +609,32 @@ export default function Home() {
             </div>
           </form>
         </div>
+      </section>
+
+      <section className={`mb-5 rounded-[1.5rem] border p-4 shadow-xl sm:mb-6 sm:p-5 ${isModerator ? 'border-[var(--accent)]/50 bg-[rgba(30,215,96,0.08)]' : 'border-white/10 bg-[var(--card)]/80'}`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div className="mb-1 text-xs font-bold uppercase tracking-[0.22em] text-[var(--accent)]">moderator</div>
+            <p className="text-sm text-[var(--muted)]">mods can delete tracks, votes, and playlists. players stay safe from accidental nuke buttons.</p>
+          </div>
+          {isModerator ? (
+            <button type="button" onClick={lockModerator} className="rounded-full border border-white/15 px-4 py-3 text-sm font-bold text-white hover:border-white/50">Mod on · lock</button>
+          ) : (
+            <form onSubmit={unlockModerator} className="flex gap-2 sm:w-72">
+              <input
+                type="password"
+                inputMode="numeric"
+                value={moderatorCode}
+                onChange={(e) => setModeratorCode(e.target.value)}
+                placeholder="Mod code"
+                aria-label="Moderator password"
+                className="min-w-0 flex-1 rounded-full bg-[var(--background)] px-4 py-3 text-white ring-1 ring-white/10 placeholder:text-[var(--muted)] focus:outline-none focus:ring-[var(--accent)]"
+              />
+              <button type="submit" className="rounded-full bg-white px-4 py-3 text-sm font-black uppercase tracking-wide text-black">Unlock</button>
+            </form>
+          )}
+        </div>
+        {moderatorMessage && <div className="mt-2 text-xs font-semibold uppercase tracking-wide text-[var(--accent)]">{moderatorMessage}</div>}
       </section>
 
       {errorMessage && (
@@ -628,10 +686,10 @@ export default function Home() {
             ) : (
               <div
                 key={playlist.id}
-                className="p-4 sm:p-6 bg-[var(--card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group"
+                className="rounded-[1.75rem] border border-white/10 bg-[rgba(24,24,24,0.92)] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.28)] transition hover:border-[var(--accent)]/60 sm:p-6"
               >
                 <Link href={`/${playlist.slug}`} className="block mb-4">
-                  <h2 className="text-xl sm:text-2xl font-medium group-hover:text-[var(--accent)] transition-colors">
+                  <h2 className="text-2xl font-black tracking-tight transition-colors group-hover:text-[var(--accent)] sm:text-3xl">
                     {playlist.name}
                   </h2>
                   <p className="text-[var(--muted)] text-sm mt-1">
@@ -642,7 +700,7 @@ export default function Home() {
                 {playlist.playlist_prompts?.length > 0 ? (
                   <div className="mb-4 space-y-4 border-t border-[var(--border)] pt-4">
                     {playlist.playlist_prompts.map((prompt, index) => (
-                      <div key={prompt.id}>
+                      <div key={prompt.id} className="rounded-[1.25rem] border border-white/10 bg-black/20 p-3 sm:p-4">
                         <div className="flex items-start gap-3">
                           <span className="text-[var(--accent)] font-mono text-xs mt-1">
                             {String(index + 1).padStart(2, '0')}
@@ -665,7 +723,7 @@ export default function Home() {
                                   return (
                                     <div
                                       key={track.id}
-                                      className={`border-l-4 px-4 py-3 text-sm text-[var(--muted)] transition-colors ${trackIsMine ? 'border-white bg-[rgba(255,80,36,0.16)] ring-1 ring-[rgba(255,80,36,0.55)]' : 'border-[var(--accent)] bg-[var(--background)]'}`}
+                                      className={`rounded-[1.25rem] border px-4 py-4 text-sm text-[var(--muted)] shadow-lg transition-colors ${trackIsMine ? 'border-[var(--accent)]/60 bg-[rgba(30,215,96,0.12)] ring-1 ring-[rgba(30,215,96,0.45)]' : 'border-white/10 bg-[var(--background)]'}`}
                                     >
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
@@ -676,14 +734,16 @@ export default function Home() {
                                             <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">your track</div>
                                           )}
                                         </div>
-                                        <button
-                                          type="button"
-                                          onClick={() => openTrackDeleteModal(track)}
-                                          className="shrink-0 text-xs text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-                                          aria-label={`Delete track ${track.name}`}
-                                        >
-                                          Delete
-                                        </button>
+                                        {canDeleteTrack({ isModerator }) && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openTrackDeleteModal(track)}
+                                            className="shrink-0 rounded-full border border-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                                            aria-label={`Delete track ${track.name}`}
+                                          >
+                                            Delete
+                                          </button>
+                                        )}
                                       </div>
 
                                       <div className="mt-3">
@@ -699,20 +759,22 @@ export default function Home() {
                                               return (
                                                 <span
                                                   key={vote.id}
-                                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${isMine ? 'border-[var(--accent)] bg-[rgba(255,80,36,0.2)] text-white' : isAboutMe ? 'border-white bg-white text-black' : 'border-[var(--border)] bg-[var(--card)] text-white'}`}
+                                                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm ${isMine ? 'border-[var(--accent)] bg-[rgba(30,215,96,0.18)] text-white' : isAboutMe ? 'border-white bg-white text-black' : 'border-white/10 bg-[var(--card)] text-white'}`}
                                                 >
                                                   {isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">you guessed</span>}
                                                   {isAboutMe && !isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-black/60">you?</span>}
                                                   <span>{vote.voter_name}</span>
                                                   <span className={isAboutMe ? 'text-black/55' : 'text-[var(--muted)]'}>← guessed by {vote.voter_username || 'someone mysterious'}</span>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => deleteVote(vote.id)}
-                                                    className={isAboutMe ? 'text-black/50 hover:text-black transition-colors' : 'text-[var(--muted)] hover:text-[var(--accent)] transition-colors'}
-                                                    aria-label={`Delete vote for ${vote.voter_name}`}
-                                                  >
-                                                    ×
-                                                  </button>
+                                                  {canDeleteVote({ isModerator }) && (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => deleteVote(vote.id)}
+                                                      className={isAboutMe ? 'text-black/50 hover:text-black transition-colors' : 'text-[var(--muted)] hover:text-[var(--accent)] transition-colors'}
+                                                      aria-label={`Delete vote for ${vote.voter_name}`}
+                                                    >
+                                                      ×
+                                                    </button>
+                                                  )}
                                                 </span>
                                               )
                                             })}
@@ -735,13 +797,13 @@ export default function Home() {
                                             }}
                                             placeholder={!playerName ? 'Set your game name first...' : maxVotes === 0 ? 'Need at least 2 tracks to guess' : alreadyVoted ? 'You already guessed this one' : voteLimitReached ? 'Guess limit reached' : 'Who do you think picked this?'}
                                             disabled={votingDisabled}
-                                            className="flex-1 px-3 py-2 bg-[var(--card)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 text-sm"
+                                            className="flex-1 rounded-full px-4 py-3 bg-[var(--card)] ring-1 ring-white/10 text-white placeholder:text-[var(--muted)] focus:outline-none focus:ring-[var(--accent)] disabled:opacity-50 text-sm"
                                           />
                                           <button
                                             type="button"
                                             onClick={() => addVote(track, maxVotes)}
                                             disabled={addingVote[track.id] || votingDisabled || !voteInputs[track.id]?.trim()}
-                                            className="w-full sm:w-auto px-4 py-2 border border-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                                            className="w-full rounded-full px-5 py-3 border border-[var(--accent)] text-white text-sm font-black uppercase tracking-wide hover:bg-[var(--accent)] hover:text-black transition-colors disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-white sm:w-auto"
                                           >
                                             {addingVote[track.id] ? 'Guessing...' : 'Guess'}
                                           </button>
@@ -837,22 +899,26 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => startEdit(playlist)}
-                    className="p-2.5 sm:p-2 border border-[var(--border)] text-[var(--muted)] hover:text-white transition-colors"
-                    aria-label="Edit playlist"
-                  >
-                    <EditIcon className="w-5 h-5 sm:w-4 sm:h-4" />
-                  </button>
-                  <button
-                    onClick={() => openDeleteModal(playlist)}
-                    className="p-2.5 sm:p-2 border border-[var(--border)] text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-                    aria-label="Delete playlist"
-                  >
-                    <TrashIcon className="w-5 h-5 sm:w-4 sm:h-4" />
-                  </button>
-                </div>
+                {isModerator && (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      onClick={() => startEdit(playlist)}
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-4 py-3 text-sm font-bold text-[var(--muted)] transition-colors hover:border-white/40 hover:text-white"
+                      aria-label="Edit playlist"
+                    >
+                      <EditIcon className="w-5 h-5 sm:w-4 sm:h-4" />
+                      Edit playlist
+                    </button>
+                    <button
+                      onClick={() => openDeleteModal(playlist)}
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-4 py-3 text-sm font-bold text-[var(--muted)] transition-colors hover:border-[var(--accent-hot)] hover:text-[var(--accent-hot)]"
+                      aria-label="Delete playlist"
+                    >
+                      <TrashIcon className="w-5 h-5 sm:w-4 sm:h-4" />
+                      Delete playlist
+                    </button>
+                  </div>
+                )}
               </div>
             )
           ))}
