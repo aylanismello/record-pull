@@ -222,6 +222,24 @@ export default function Home() {
     setAddingTrack(prev => ({ ...prev, [promptId]: false }))
   }
 
+  async function deleteTrack(trackId) {
+    if (!supabase) return
+
+    setErrorMessage(null)
+
+    const { error } = await supabase
+      .from('playlist_tracks')
+      .delete()
+      .eq('id', trackId)
+
+    if (error) {
+      console.error('Failed to delete track:', error)
+      setErrorMessage(error.message || 'Could not delete track.')
+    } else {
+      fetchPlaylists()
+    }
+  }
+
   function openDeleteModal(playlist) {
     setDeleteModal({ isOpen: true, playlist })
   }
@@ -368,9 +386,17 @@ export default function Home() {
                                 {prompt.playlist_tracks.map((track) => (
                                   <div
                                     key={track.id}
-                                    className="border-l-2 border-[var(--accent)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--muted)]"
+                                    className="group/track flex items-center justify-between gap-3 border-l-2 border-[var(--accent)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--muted)]"
                                   >
-                                    {track.name}
+                                    <span className="min-w-0 flex-1 break-words">{track.name}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteTrack(track.id)}
+                                      className="text-xs text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                                      aria-label={`Delete track ${track.name}`}
+                                    >
+                                      Delete
+                                    </button>
                                   </div>
                                 ))}
                               </div>
