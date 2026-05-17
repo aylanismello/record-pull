@@ -68,27 +68,57 @@ export function shouldTreatVoteAsMine(vote, player) {
   return normalizePlayerName(vote.voter_username) === normalizePlayerName(player?.displayName)
 }
 
-export function renamePlayerReferences(playlists, playerId, nextDisplayName) {
+export function isVoteAboutPlayer(vote, player) {
+  if (vote.guessed_player_id && player?.id) {
+    return vote.guessed_player_id === player.id
+  }
+
+  return normalizePlayerName(vote.voter_name) === normalizePlayerName(player?.displayName)
+}
+
+export function getVoteMarkers(vote, player) {
+  return {
+    isMine: shouldTreatVoteAsMine(vote, player),
+    isAboutMe: isVoteAboutPlayer(vote, player)
+  }
+}
+
+export function renamePlayerReferences(playlists, playerId, nextDisplayName, previousDisplayName = '') {
   const trackVoteIds = []
+  const guessedVoteIds = []
   const trackIds = []
+  const legacyVoterVoteIds = []
+  const legacyGuessedVoteIds = []
+  const legacyTrackIds = []
+  const previousKey = normalizePlayerName(previousDisplayName)
 
   playlists.forEach(playlist => {
     ;(playlist.playlist_prompts || []).forEach(prompt => {
       ;(prompt.playlist_tracks || []).forEach(track => {
         if (track.submitter_player_id === playerId && track.submitter_name !== nextDisplayName) {
           trackIds.push(track.id)
+        } else if (!track.submitter_player_id && previousKey && normalizePlayerName(track.submitter_name) === previousKey && track.submitter_name !== nextDisplayName) {
+          legacyTrackIds.push(track.id)
         }
 
         ;(track.track_votes || []).forEach(vote => {
           if (vote.voter_player_id === playerId && vote.voter_username !== nextDisplayName) {
             trackVoteIds.push(vote.id)
+          } else if (!vote.voter_player_id && previousKey && normalizePlayerName(vote.voter_username) === previousKey && vote.voter_username !== nextDisplayName) {
+            legacyVoterVoteIds.push(vote.id)
+          }
+
+          if (vote.guessed_player_id === playerId && vote.voter_name !== nextDisplayName) {
+            guessedVoteIds.push(vote.id)
+          } else if (!vote.guessed_player_id && !vote.voter_player_id && previousKey && normalizePlayerName(vote.voter_name) === previousKey && vote.voter_name !== nextDisplayName) {
+            legacyGuessedVoteIds.push(vote.id)
           }
         })
       })
     })
   })
 
-  return { trackVoteIds, trackIds }
+  return { trackVoteIds, guessedVoteIds, trackIds, legacyVoterVoteIds, legacyGuessedVoteIds, legacyTrackIds }
 }
 
 export function collectPlayerNames(playlists) {

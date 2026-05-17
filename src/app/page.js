@@ -10,6 +10,7 @@ import {
   PLAYER_NAME_COOKIE,
   collectPlayerNames,
   createPlayerId,
+  getVoteMarkers,
   makeUniqueDisplayName,
   normalizePlayerName,
   readCookie,
@@ -347,7 +348,7 @@ export default function Home() {
 
     const uniqueName = makeUniqueDisplayName(requestedName, collectPlayerNames(playlists), playerName)
     const changed = uniqueName !== playerName
-    const references = renamePlayerReferences(playlists, playerId, uniqueName)
+    const references = renamePlayerReferences(playlists, playerId, uniqueName, playerName)
 
     setErrorMessage(null)
 
@@ -363,25 +364,30 @@ export default function Home() {
         )
       }
 
-      const guessedVoteIds = []
-      playlists.forEach(playlist => {
-        ;(playlist.playlist_prompts || []).forEach(prompt => {
-          ;(prompt.playlist_tracks || []).forEach(track => {
-            ;(track.track_votes || []).forEach(vote => {
-              if (vote.guessed_player_id === playerId && vote.voter_name !== uniqueName) {
-                guessedVoteIds.push(vote.id)
-              }
-            })
-          })
-        })
-      })
+      if (references.legacyVoterVoteIds.length > 0) {
+        updates.push(
+          supabase
+            .from('track_votes')
+            .update({ voter_username: uniqueName, voter_player_id: playerId })
+            .in('id', references.legacyVoterVoteIds)
+        )
+      }
 
-      if (guessedVoteIds.length > 0) {
+      if (references.guessedVoteIds.length > 0) {
         updates.push(
           supabase
             .from('track_votes')
             .update({ voter_name: uniqueName })
-            .in('id', guessedVoteIds)
+            .in('id', references.guessedVoteIds)
+        )
+      }
+
+      if (references.legacyGuessedVoteIds.length > 0) {
+        updates.push(
+          supabase
+            .from('track_votes')
+            .update({ voter_name: uniqueName, guessed_player_id: playerId })
+            .in('id', references.legacyGuessedVoteIds)
         )
       }
 
@@ -391,6 +397,15 @@ export default function Home() {
             .from('playlist_tracks')
             .update({ submitter_name: uniqueName })
             .in('id', references.trackIds)
+        )
+      }
+
+      if (references.legacyTrackIds.length > 0) {
+        updates.push(
+          supabase
+            .from('playlist_tracks')
+            .update({ submitter_name: uniqueName, submitter_player_id: playerId })
+            .in('id', references.legacyTrackIds)
         )
       }
 
@@ -641,18 +656,25 @@ export default function Home() {
                                 {prompt.playlist_tracks.map((track) => {
                                   const maxVotes = Math.max((prompt.playlist_tracks?.length || 0) - 1, 0)
                                   const votes = track.track_votes || []
-                                  const alreadyVoted = playerName && votes.some(vote => shouldTreatVoteAsMine(vote, { id: playerId, displayName: playerName }))
+                                  const currentPlayer = { id: playerId, displayName: playerName }
+                                  const trackIsMine = Boolean(playerId && track.submitter_player_id === playerId) || (!track.submitter_player_id && normalizePlayerName(track.submitter_name) === normalizePlayerName(playerName))
+                                  const alreadyVoted = playerName && votes.some(vote => shouldTreatVoteAsMine(vote, currentPlayer))
                                   const voteLimitReached = votes.length >= maxVotes
                                   const votingDisabled = !playerName || maxVotes === 0 || voteLimitReached || alreadyVoted
 
                                   return (
                                     <div
                                       key={track.id}
-                                      className="border-l-4 border-[var(--accent)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--muted)]"
+                                      className={`border-l-4 px-4 py-3 text-sm text-[var(--muted)] transition-colors ${trackIsMine ? 'border-white bg-[rgba(255,80,36,0.16)] ring-1 ring-[rgba(255,80,36,0.55)]' : 'border-[var(--accent)] bg-[var(--background)]'}`}
                                     >
                                       <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1 text-base font-medium text-white break-words">
-                                          {track.name}
+                                        <div className="min-w-0 flex-1">
+                                          <div className="text-base font-medium text-white break-words">
+                                            {track.name}
+                                          </div>
+                                          {trackIsMine && (
+                                            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">your track</div>
+                                          )}
                                         </div>
                                         <button
                                           type="button"
@@ -672,23 +694,28 @@ export default function Home() {
 
                                         {votes.length > 0 && (
                                           <div className="mb-3 flex flex-wrap gap-2">
-                                            {votes.map((vote) => (
-                                              <span
-                                                key={vote.id}
-                                                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs text-white"
-                                              >
-                                                <span>{vote.voter_name}</span>
-                                                <span className="text-[var(--muted)]">← guessed by {vote.voter_username || 'someone mysterious'}</span>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => deleteVote(vote.id)}
-                                                  className="text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
-                                                  aria-label={`Delete vote for ${vote.voter_name}`}
+                                            {votes.map((vote) => {
+                                              const { isMine, isAboutMe } = getVoteMarkers(vote, currentPlayer)
+                                              return (
+                                                <span
+                                                  key={vote.id}
+                                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${isMine ? 'border-[var(--accent)] bg-[rgba(255,80,36,0.2)] text-white' : isAboutMe ? 'border-white bg-white text-black' : 'border-[var(--border)] bg-[var(--card)] text-white'}`}
                                                 >
-                                                  ×
-                                                </button>
-                                              </span>
-                                            ))}
+                                                  {isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">you guessed</span>}
+                                                  {isAboutMe && !isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-black/60">you?</span>}
+                                                  <span>{vote.voter_name}</span>
+                                                  <span className={isAboutMe ? 'text-black/55' : 'text-[var(--muted)]'}>← guessed by {vote.voter_username || 'someone mysterious'}</span>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => deleteVote(vote.id)}
+                                                    className={isAboutMe ? 'text-black/50 hover:text-black transition-colors' : 'text-[var(--muted)] hover:text-[var(--accent)] transition-colors'}
+                                                    aria-label={`Delete vote for ${vote.voter_name}`}
+                                                  >
+                                                    ×
+                                                  </button>
+                                                </span>
+                                              )
+                                            })}
                                           </div>
                                         )}
 
