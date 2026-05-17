@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, use } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, supabaseConfigError } from '@/lib/supabase'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import ConfirmModal from '@/components/ConfirmModal'
@@ -19,6 +19,7 @@ export default function PlaylistPage({ params }) {
   const [addingPrompt, setAddingPrompt] = useState(false)
   const [trackInputs, setTrackInputs] = useState({})
   const [addingTrack, setAddingTrack] = useState({})
+  const [errorMessage, setErrorMessage] = useState(supabaseConfigError)
 
   // Edit states
   const [editingPlaylist, setEditingPlaylist] = useState(false)
@@ -36,6 +37,11 @@ export default function PlaylistPage({ params }) {
   const [deleting, setDeleting] = useState(false)
 
   async function fetchPlaylist() {
+    if (!supabase) {
+      setLoading(false)
+      return
+    }
+
     // Get playlist by slug
     const { data: playlistData, error: playlistError } = await supabase
       .from('playlists')
@@ -44,6 +50,8 @@ export default function PlaylistPage({ params }) {
       .single()
 
     if (playlistError || !playlistData) {
+      console.error('Failed to fetch playlist:', playlistError)
+      setErrorMessage(playlistError?.message || 'Playlist not found.')
       setNotFound(true)
       setLoading(false)
       return
@@ -52,7 +60,7 @@ export default function PlaylistPage({ params }) {
     setPlaylist(playlistData)
 
     // Get prompts with their tracks
-    const { data: promptsData } = await supabase
+    const { data: promptsData, error: promptsError } = await supabase
       .from('playlist_prompts')
       .select(`
         *,
@@ -61,7 +69,14 @@ export default function PlaylistPage({ params }) {
       .eq('playlist_id', playlistData.id)
       .order('sort_order', { ascending: true })
 
-    setPrompts(promptsData || [])
+    if (promptsError) {
+      console.error('Failed to fetch prompts:', promptsError)
+      setErrorMessage(promptsError.message || 'Could not load prompts.')
+      setPrompts([])
+    } else {
+      setErrorMessage(null)
+      setPrompts(promptsData || [])
+    }
     setLoading(false)
   }
 
@@ -88,7 +103,11 @@ export default function PlaylistPage({ params }) {
         sort_order: nextOrder
       }])
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to add prompt:', error)
+      setErrorMessage(error.message || 'Could not add prompt.')
+    } else {
+      setErrorMessage(null)
       setNewPromptDescription('')
       setShowAddPrompt(false)
       fetchPlaylist()
@@ -109,7 +128,11 @@ export default function PlaylistPage({ params }) {
         name: trackName
       }])
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to add track:', error)
+      setErrorMessage(error.message || 'Could not add track.')
+    } else {
+      setErrorMessage(null)
       setTrackInputs(prev => ({ ...prev, [promptId]: '' }))
       fetchPlaylist()
     }
@@ -137,7 +160,11 @@ export default function PlaylistPage({ params }) {
       .update({ name: editPlaylistName.trim() })
       .eq('id', playlist.id)
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to update playlist:', error)
+      setErrorMessage(error.message || 'Could not update playlist.')
+    } else {
+      setErrorMessage(null)
       setPlaylist({ ...playlist, name: editPlaylistName.trim() })
       cancelEditPlaylist()
     }
@@ -165,7 +192,11 @@ export default function PlaylistPage({ params }) {
       .update({ description: editPromptText.trim() })
       .eq('id', promptId)
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to update prompt:', error)
+      setErrorMessage(error.message || 'Could not update prompt.')
+    } else {
+      setErrorMessage(null)
       cancelEditPrompt()
       fetchPlaylist()
     }
@@ -193,7 +224,11 @@ export default function PlaylistPage({ params }) {
       .update({ name: editTrackText.trim() })
       .eq('id', trackId)
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to update track:', error)
+      setErrorMessage(error.message || 'Could not update track.')
+    } else {
+      setErrorMessage(null)
       cancelEditTrack()
       fetchPlaylist()
     }
@@ -214,37 +249,48 @@ export default function PlaylistPage({ params }) {
     if (!item) return
 
     setDeleting(true)
+    setErrorMessage(null)
+
+    let error = null
 
     if (type === 'playlist') {
-      const { error } = await supabase
+      const result = await supabase
         .from('playlists')
         .delete()
         .eq('id', item.id)
+      error = result.error
 
       if (!error) {
         router.push('/')
         return
       }
     } else if (type === 'prompt') {
-      const { error } = await supabase
+      const result = await supabase
         .from('playlist_prompts')
         .delete()
         .eq('id', item.id)
+      error = result.error
 
       if (!error) {
         fetchPlaylist()
         closeDeleteModal()
       }
     } else if (type === 'track') {
-      const { error } = await supabase
+      const result = await supabase
         .from('playlist_tracks')
         .delete()
         .eq('id', item.id)
+      error = result.error
 
       if (!error) {
         fetchPlaylist()
         closeDeleteModal()
       }
+    }
+
+    if (error) {
+      console.error(`Failed to delete ${type}:`, error)
+      setErrorMessage(error.message || `Could not delete ${type}.`)
     }
 
     setDeleting(false)
@@ -340,6 +386,12 @@ export default function PlaylistPage({ params }) {
           </>
         )}
       </header>
+
+      {errorMessage && (
+        <div className="mb-6 border border-[var(--accent)] bg-[var(--accent)]/10 px-4 py-3 text-sm text-white">
+          <span className="font-medium">Database error:</span> {errorMessage}
+        </div>
+      )}
 
       <div className="mb-6 sm:mb-8">
         {!showAddPrompt ? (
