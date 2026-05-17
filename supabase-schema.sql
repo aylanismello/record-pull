@@ -6,7 +6,6 @@ CREATE TABLE playlists (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
-  is_revealed BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -24,7 +23,6 @@ CREATE TABLE playlist_tracks (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   playlist_prompt_id UUID NOT NULL REFERENCES playlist_prompts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  submitter_name TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -43,7 +41,6 @@ CREATE INDEX idx_playlist_prompts_sort_order ON playlist_prompts(playlist_id, so
 CREATE INDEX idx_playlist_tracks_prompt_id ON playlist_tracks(playlist_prompt_id);
 CREATE INDEX idx_track_votes_track_id ON track_votes(track_id);
 CREATE INDEX idx_track_votes_voter_username ON track_votes(voter_username);
-CREATE UNIQUE INDEX idx_track_votes_one_guess_per_player ON track_votes(track_id, lower(voter_username)) WHERE voter_username IS NOT NULL;
 
 -- Enable Row Level Security (but allow all operations since it's anonymous)
 ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;
