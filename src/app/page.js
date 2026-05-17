@@ -6,6 +6,7 @@ import Link from 'next/link'
 import ConfirmModal from '@/components/ConfirmModal'
 import { EditIcon, TrashIcon } from '@/components/Icons'
 import { MODERATOR_COOKIE, canDeletePlaylist, canDeleteTrack, canDeleteVote, validateModeratorCode } from '@/lib/moderator'
+import { collectPlaylistPlayers, isCorrectGuess, playerOptionsForTrack, scorePlaylist } from '@/lib/gameLogic'
 import {
   PLAYER_ID_COOKIE,
   PLAYER_NAME_COOKIE,
@@ -46,6 +47,8 @@ export default function Home() {
   const [moderatorCode, setModeratorCode] = useState('')
   const [isModerator, setIsModerator] = useState(false)
   const [moderatorMessage, setModeratorMessage] = useState('')
+  const [expandedPrompts, setExpandedPrompts] = useState({})
+  const [revealedPlaylists, setRevealedPlaylists] = useState({})
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -531,6 +534,23 @@ export default function Home() {
     setModeratorMessage('mod mode off')
   }
 
+  function togglePrompt(promptId) {
+    setExpandedPrompts(prev => ({ ...prev, [promptId]: !prev[promptId] }))
+  }
+
+  function isPromptExpanded(promptId) {
+    return expandedPrompts[promptId] === true
+  }
+
+  function toggleReveal(playlistId) {
+    if (!isModerator) return
+    setRevealedPlaylists(prev => ({ ...prev, [playlistId]: !prev[playlistId] }))
+  }
+
+  function isPlaylistRevealed(playlistId) {
+    return revealedPlaylists[playlistId] === true
+  }
+
   return (
     <main className="min-h-screen overflow-hidden px-3 py-4 sm:px-6 md:px-8 max-w-5xl mx-auto">
       <header className="mb-5 rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.28),transparent_35%),linear-gradient(145deg,rgba(31,31,31,0.96),rgba(12,12,12,0.98))] p-5 shadow-2xl sm:mb-7 sm:p-8">
@@ -697,28 +717,69 @@ export default function Home() {
                   </p>
                 </Link>
 
+                {isModerator && playlist.playlist_prompts?.length > 0 && (
+                  <div className="mb-4 rounded-[1.25rem] border border-white/10 bg-black/20 p-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleReveal(playlist.id)}
+                      className={`w-full rounded-full px-5 py-3 text-sm font-black uppercase tracking-wide transition ${isPlaylistRevealed(playlist.id) ? 'bg-white text-black' : 'bg-[var(--accent)] text-black'}`}
+                    >
+                      {isPlaylistRevealed(playlist.id) ? 'Hide answers' : 'Reveal answers'}
+                    </button>
+                    {isPlaylistRevealed(playlist.id) && (
+                      <div className="mt-3 space-y-2">
+                        <div className="text-xs font-black uppercase tracking-[0.18em] text-[var(--accent)]">scoreboard</div>
+                        {scorePlaylist(playlist).length > 0 ? scorePlaylist(playlist).map(score => (
+                          <div key={score.playerId || score.name} className="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2 text-sm">
+                            <span className="font-bold text-white">{score.name}</span>
+                            <span className="text-[var(--muted)]">{score.correct}/{score.total} right</span>
+                          </div>
+                        )) : <div className="text-sm text-[var(--muted)]">No guesses yet.</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {playlist.playlist_prompts?.length > 0 ? (
-                  <div className="mb-4 space-y-4 border-t border-[var(--border)] pt-4">
-                    {playlist.playlist_prompts.map((prompt, index) => (
-                      <div key={prompt.id} className="rounded-[1.25rem] border border-white/10 bg-black/20 p-3 sm:p-4">
-                        <div className="flex items-start gap-3">
-                          <span className="text-[var(--accent)] font-mono text-xs mt-1">
-                            {String(index + 1).padStart(2, '0')}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm sm:text-base text-white break-words">
-                              {prompt.description}
-                            </p>
-                            {prompt.playlist_tracks?.length > 0 ? (
-                              <div className="mt-3 space-y-3">
-                                {prompt.playlist_tracks.map((track) => {
+                  <div className="mb-4 space-y-3 border-t border-white/10 pt-4">
+                    {playlist.playlist_prompts.map((prompt, index) => {
+                      const expanded = isPromptExpanded(prompt.id)
+                      const trackCount = prompt.playlist_tracks?.length || 0
+                      const guessCount = (prompt.playlist_tracks || []).reduce((total, track) => total + (track.track_votes?.length || 0), 0)
+                      const players = collectPlaylistPlayers(playlist)
+                      const revealed = isPlaylistRevealed(playlist.id)
+
+                      return (
+                        <div key={prompt.id} className="overflow-hidden rounded-[1.35rem] border border-white/10 bg-black/20">
+                          <button
+                            type="button"
+                            onClick={() => togglePrompt(prompt.id)}
+                            className="flex w-full items-center justify-between gap-3 p-4 text-left"
+                            aria-expanded={expanded}
+                          >
+                            <div className="min-w-0">
+                              <div className="mb-1 flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-[var(--accent)]">
+                                <span>{String(index + 1).padStart(2, '0')}</span>
+                                <span>round</span>
+                              </div>
+                              <p className="text-base font-bold text-white sm:text-lg">{prompt.description}</p>
+                              <p className="mt-1 text-xs text-[var(--muted)]">{trackCount} track{trackCount === 1 ? '' : 's'} · {guessCount} guess{guessCount === 1 ? '' : 'es'} · {players.length} player{players.length === 1 ? '' : 's'}</p>
+                            </div>
+                            <span className="shrink-0 rounded-full bg-white/10 px-3 py-1 text-xs font-black text-white">{expanded ? 'Hide' : 'Open'}</span>
+                          </button>
+
+                          {expanded && (
+                            <div className="space-y-3 border-t border-white/10 p-3 sm:p-4">
+                              {prompt.playlist_tracks?.length > 0 ? (
+                                prompt.playlist_tracks.map((track) => {
                                   const maxVotes = Math.max((prompt.playlist_tracks?.length || 0) - 1, 0)
                                   const votes = track.track_votes || []
+                                  const options = playerOptionsForTrack(playlist, track, playerId)
                                   const currentPlayer = { id: playerId, displayName: playerName }
                                   const trackIsMine = Boolean(playerId && track.submitter_player_id === playerId) || (!track.submitter_player_id && normalizePlayerName(track.submitter_name) === normalizePlayerName(playerName))
                                   const alreadyVoted = playerName && votes.some(vote => shouldTreatVoteAsMine(vote, currentPlayer))
                                   const voteLimitReached = votes.length >= maxVotes
-                                  const votingDisabled = !playerName || maxVotes === 0 || voteLimitReached || alreadyVoted
+                                  const votingDisabled = !playerName || maxVotes === 0 || voteLimitReached || alreadyVoted || options.length === 0
 
                                   return (
                                     <div
@@ -727,18 +788,17 @@ export default function Home() {
                                     >
                                       <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1">
-                                          <div className="text-base font-medium text-white break-words">
-                                            {track.name}
+                                          <div className="text-base font-bold text-white break-words">{track.name}</div>
+                                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-[0.16em]">
+                                            {trackIsMine && <span className="text-[var(--accent)]">your track</span>}
+                                            {revealed && <span className="rounded-full bg-white px-2 py-1 text-black">picked by {track.submitter_name || 'unknown'}</span>}
                                           </div>
-                                          {trackIsMine && (
-                                            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">your track</div>
-                                          )}
                                         </div>
                                         {canDeleteTrack({ isModerator }) && (
                                           <button
                                             type="button"
                                             onClick={() => openTrackDeleteModal(track)}
-                                            className="shrink-0 rounded-full border border-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                                            className="shrink-0 rounded-full border border-white/15 px-4 py-2 text-xs font-black uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-hot)] hover:text-[var(--accent-hot)] transition-colors"
                                             aria-label={`Delete track ${track.name}`}
                                           >
                                             Delete
@@ -756,20 +816,22 @@ export default function Home() {
                                           <div className="mb-3 flex flex-wrap gap-2">
                                             {votes.map((vote) => {
                                               const { isMine, isAboutMe } = getVoteMarkers(vote, currentPlayer)
+                                              const correct = isCorrectGuess(vote, track)
                                               return (
                                                 <span
                                                   key={vote.id}
-                                                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm ${isMine ? 'border-[var(--accent)] bg-[rgba(30,215,96,0.18)] text-white' : isAboutMe ? 'border-white bg-white text-black' : 'border-white/10 bg-[var(--card)] text-white'}`}
+                                                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm ${revealed && correct ? 'border-[var(--accent)] bg-[var(--accent)] text-black' : isMine ? 'border-[var(--accent)] bg-[rgba(30,215,96,0.18)] text-white' : isAboutMe ? 'border-white bg-white text-black' : 'border-white/10 bg-[var(--card)] text-white'}`}
                                                 >
-                                                  {isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">you guessed</span>}
-                                                  {isAboutMe && !isMine && <span className="text-[10px] font-semibold uppercase tracking-wide text-black/60">you?</span>}
+                                                  {revealed && <span className="font-black">{correct ? '✓' : '×'}</span>}
+                                                  {isMine && !revealed && <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">you guessed</span>}
+                                                  {isAboutMe && !isMine && !revealed && <span className="text-[10px] font-semibold uppercase tracking-wide text-black/60">you?</span>}
                                                   <span>{vote.voter_name}</span>
-                                                  <span className={isAboutMe ? 'text-black/55' : 'text-[var(--muted)]'}>← guessed by {vote.voter_username || 'someone mysterious'}</span>
+                                                  <span className={revealed && correct ? 'text-black/60' : isAboutMe ? 'text-black/55' : 'text-[var(--muted)]'}>← {vote.voter_username || 'someone mysterious'}</span>
                                                   {canDeleteVote({ isModerator }) && (
                                                     <button
                                                       type="button"
                                                       onClick={() => deleteVote(vote.id)}
-                                                      className={isAboutMe ? 'text-black/50 hover:text-black transition-colors' : 'text-[var(--muted)] hover:text-[var(--accent)] transition-colors'}
+                                                      className={revealed && correct ? 'text-black/55 hover:text-black' : isAboutMe ? 'text-black/50 hover:text-black transition-colors' : 'text-[var(--muted)] hover:text-[var(--accent-hot)] transition-colors'}
                                                       aria-label={`Delete vote for ${vote.voter_name}`}
                                                     >
                                                       ×
@@ -781,75 +843,76 @@ export default function Home() {
                                           </div>
                                         )}
 
-                                        <div className="flex flex-col sm:flex-row gap-2">
-                                          <input
-                                            type="text"
-                                            value={voteInputs[track.id] || ''}
-                                            onChange={(e) => setVoteInputs(prev => ({
-                                              ...prev,
-                                              [track.id]: e.target.value
-                                            }))}
-                                            onKeyDown={(e) => {
-                                              if (e.key === 'Enter') {
-                                                e.preventDefault()
-                                                addVote(track, maxVotes)
-                                              }
-                                            }}
-                                            placeholder={!playerName ? 'Set your game name first...' : maxVotes === 0 ? 'Need at least 2 tracks to guess' : alreadyVoted ? 'You already guessed this one' : voteLimitReached ? 'Guess limit reached' : 'Who do you think picked this?'}
-                                            disabled={votingDisabled}
-                                            className="flex-1 rounded-full px-4 py-3 bg-[var(--card)] ring-1 ring-white/10 text-white placeholder:text-[var(--muted)] focus:outline-none focus:ring-[var(--accent)] disabled:opacity-50 text-sm"
-                                          />
-                                          <button
-                                            type="button"
-                                            onClick={() => addVote(track, maxVotes)}
-                                            disabled={addingVote[track.id] || votingDisabled || !voteInputs[track.id]?.trim()}
-                                            className="w-full rounded-full px-5 py-3 border border-[var(--accent)] text-white text-sm font-black uppercase tracking-wide hover:bg-[var(--accent)] hover:text-black transition-colors disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-white sm:w-auto"
-                                          >
-                                            {addingVote[track.id] ? 'Guessing...' : 'Guess'}
-                                          </button>
-                                        </div>
+                                        {!revealed && (
+                                          <div className="flex flex-col gap-2 sm:flex-row">
+                                            <select
+                                              value={voteInputs[track.id] || ''}
+                                              onChange={(e) => setVoteInputs(prev => ({
+                                                ...prev,
+                                                [track.id]: e.target.value
+                                              }))}
+                                              disabled={votingDisabled}
+                                              className="flex-1 rounded-full px-4 py-3 bg-[var(--card)] ring-1 ring-white/10 text-white focus:outline-none focus:ring-[var(--accent)] disabled:opacity-50 text-sm"
+                                            >
+                                              <option value="">{!playerName ? 'Set your game name first...' : options.length === 0 ? 'Need players first' : alreadyVoted ? 'You already guessed this one' : voteLimitReached ? 'Guess limit reached' : 'Pick a player'}</option>
+                                              {options.map(option => (
+                                                <option key={option.id || option.name} value={option.name}>{option.name}</option>
+                                              ))}
+                                            </select>
+                                            <button
+                                              type="button"
+                                              onClick={() => addVote(track, maxVotes)}
+                                              disabled={addingVote[track.id] || votingDisabled || !voteInputs[track.id]}
+                                              className="w-full rounded-full px-5 py-3 border border-[var(--accent)] text-white text-sm font-black uppercase tracking-wide hover:bg-[var(--accent)] hover:text-black transition-colors disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-white sm:w-auto"
+                                            >
+                                              {addingVote[track.id] ? 'Guessing...' : 'Guess'}
+                                            </button>
+                                          </div>
+                                        )}
                                       </div>
                                     </div>
                                   )
-                                })}
-                              </div>
-                            ) : (
-                              <p className="mt-2 text-xs text-[var(--muted)]">No tracks yet.</p>
-                            )}
+                                })
+                              ) : (
+                                <p className="text-xs text-[var(--muted)]">No tracks yet.</p>
+                              )}
 
-                            <div className="mt-3 flex flex-col sm:flex-row gap-2">
-                              <input
-                                type="text"
-                                value={trackInputs[prompt.id] || ''}
-                                onChange={(e) => setTrackInputs(prev => ({
-                                  ...prev,
-                                  [prompt.id]: e.target.value
-                                }))}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault()
-                                    addTrack(prompt.id)
-                                  }
-                                }}
-                                placeholder="Add a track..."
-                                className="flex-1 px-3 py-2 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] text-sm"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addTrack(prompt.id)}
-                                disabled={addingTrack[prompt.id] || !trackInputs[prompt.id]?.trim()}
-                                className="w-full sm:w-auto px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                              >
-                                {addingTrack[prompt.id] ? '...' : 'Submit'}
-                              </button>
+                              {!revealed && (
+                                <div className="flex flex-col gap-2 sm:flex-row">
+                                  <input
+                                    type="text"
+                                    value={trackInputs[prompt.id] || ''}
+                                    onChange={(e) => setTrackInputs(prev => ({
+                                      ...prev,
+                                      [prompt.id]: e.target.value
+                                    }))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        addTrack(prompt.id)
+                                      }
+                                    }}
+                                    placeholder="Add a track..."
+                                    className="flex-1 rounded-full bg-[var(--background)] px-4 py-3 text-white ring-1 ring-white/10 placeholder:text-[var(--muted)] focus:outline-none focus:ring-[var(--accent)] text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => addTrack(prompt.id)}
+                                    disabled={addingTrack[prompt.id] || !trackInputs[prompt.id]?.trim()}
+                                    className="w-full rounded-full bg-[var(--accent)] px-5 py-3 text-sm font-black uppercase tracking-wide text-black hover:opacity-90 transition-opacity disabled:opacity-50 sm:w-auto"
+                                  >
+                                    {addingTrack[prompt.id] ? '...' : 'Submit'}
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          </div>
+                          )}
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
-                  <p className="mb-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">
+                  <p className="mb-4 border-t border-white/10 pt-4 text-sm text-[var(--muted)]">
                     No prompts yet.
                   </p>
                 )}
