@@ -27,8 +27,16 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from('playlists')
-      .select('*')
+      .select(`
+        *,
+        playlist_prompts (
+          *,
+          playlist_tracks (*)
+        )
+      `)
       .order('created_at', { ascending: false })
+      .order('sort_order', { referencedTable: 'playlist_prompts', ascending: true })
+      .order('created_at', { referencedTable: 'playlist_prompts.playlist_tracks', ascending: true })
 
     if (error) {
       console.error('Failed to fetch playlists:', error)
@@ -268,7 +276,7 @@ export default function Home() {
                 key={playlist.id}
                 className="p-4 sm:p-6 bg-[var(--card)] border border-[var(--border)] hover:border-[var(--accent)] transition-colors group"
               >
-                <Link href={`/${playlist.slug}`} className="block mb-3">
+                <Link href={`/${playlist.slug}`} className="block mb-4">
                   <h2 className="text-xl sm:text-2xl font-medium group-hover:text-[var(--accent)] transition-colors">
                     {playlist.name}
                   </h2>
@@ -276,6 +284,44 @@ export default function Home() {
                     /{playlist.slug}
                   </p>
                 </Link>
+
+                {playlist.playlist_prompts?.length > 0 ? (
+                  <div className="mb-4 space-y-4 border-t border-[var(--border)] pt-4">
+                    {playlist.playlist_prompts.map((prompt, index) => (
+                      <div key={prompt.id}>
+                        <div className="flex items-start gap-3">
+                          <span className="text-[var(--accent)] font-mono text-xs mt-1">
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm sm:text-base text-white break-words">
+                              {prompt.description}
+                            </p>
+                            {prompt.playlist_tracks?.length > 0 ? (
+                              <div className="mt-2 space-y-1">
+                                {prompt.playlist_tracks.map((track) => (
+                                  <div
+                                    key={track.id}
+                                    className="border-l-2 border-[var(--accent)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--muted)]"
+                                  >
+                                    {track.name}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-2 text-xs text-[var(--muted)]">No tracks yet.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mb-4 border-t border-[var(--border)] pt-4 text-sm text-[var(--muted)]">
+                    No prompts yet.
+                  </p>
+                )}
+
                 <div className="flex gap-2">
                   <button
                     onClick={() => startEdit(playlist)}
