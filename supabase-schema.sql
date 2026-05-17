@@ -30,7 +30,8 @@ CREATE TABLE playlist_tracks (
 CREATE TABLE track_votes (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   track_id UUID NOT NULL REFERENCES playlist_tracks(id) ON DELETE CASCADE,
-  voter_name TEXT NOT NULL,
+  voter_name TEXT NOT NULL, -- who the player thinks picked the anonymous track
+  voter_username TEXT, -- who cast this guess; stored from their browser cookie
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -39,6 +40,7 @@ CREATE INDEX idx_playlist_prompts_playlist_id ON playlist_prompts(playlist_id);
 CREATE INDEX idx_playlist_prompts_sort_order ON playlist_prompts(playlist_id, sort_order);
 CREATE INDEX idx_playlist_tracks_prompt_id ON playlist_tracks(playlist_prompt_id);
 CREATE INDEX idx_track_votes_track_id ON track_votes(track_id);
+CREATE INDEX idx_track_votes_voter_username ON track_votes(voter_username);
 
 -- Enable Row Level Security (but allow all operations since it's anonymous)
 ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;

@@ -6,6 +6,25 @@ import Link from 'next/link'
 import ConfirmModal from '@/components/ConfirmModal'
 import { EditIcon, TrashIcon } from '@/components/Icons'
 
+const PLAYER_COOKIE = 'record_pull_player_name'
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 20
+
+function readPlayerNameCookie() {
+  if (typeof document === 'undefined') return ''
+
+  const cookie = document.cookie
+    .split('; ')
+    .find(row => row.startsWith(`${PLAYER_COOKIE}=`))
+
+  return cookie ? decodeURIComponent(cookie.split('=').slice(1).join('=')) : ''
+}
+
+function writePlayerNameCookie(name) {
+  if (typeof document === 'undefined') return
+
+  document.cookie = `${PLAYER_COOKIE}=${encodeURIComponent(name)}; max-age=${COOKIE_MAX_AGE}; path=/; SameSite=Lax`
+}
+
 export default function Home() {
   const [playlists, setPlaylists] = useState([])
   const [loading, setLoading] = useState(true)
@@ -26,6 +45,9 @@ export default function Home() {
   const [voteInputs, setVoteInputs] = useState({})
   const [addingVote, setAddingVote] = useState({})
   const [trackDeleteModal, setTrackDeleteModal] = useState({ isOpen: false, track: null })
+  const [playerName, setPlayerName] = useState('')
+  const [playerNameDraft, setPlayerNameDraft] = useState('')
+  const [editingPlayerName, setEditingPlayerName] = useState(false)
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -62,6 +84,15 @@ export default function Home() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPlaylists()
+  }, [])
+
+  useEffect(() => {
+    const savedName = readPlayerNameCookie()
+    if (savedName) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPlayerName(savedName)
+      setPlayerNameDraft(savedName)
+    }
   }, [])
 
   const snobPhrases = [
@@ -229,12 +260,25 @@ export default function Home() {
   }
 
   async function addVote(track, maxVotes) {
-    const voterName = voteInputs[track.id]?.trim()
-    if (!voterName || !supabase) return
+    const pickedName = voteInputs[track.id]?.trim()
+    const currentPlayerName = playerName.trim()
+    if (!pickedName || !currentPlayerName || !supabase) return
 
     const currentVotes = track.track_votes?.length || 0
+    const alreadyVoted = track.track_votes?.some(vote => vote.voter_username?.toLowerCase() === currentPlayerName.toLowerCase())
+
+    if (alreadyVoted) {
+      setErrorMessage('You already placed your guess on this track. Delete your chip if you want a do-over.')
+      return
+    }
+
+    if (pickedName.toLowerCase() === currentPlayerName.toLowerCase()) {
+      setErrorMessage('No voting for yourself, sneaky gremlin. Guess who else brought this track.')
+      return
+    }
+
     if (currentVotes >= maxVotes) {
-      setErrorMessage(`This track already has the max ${maxVotes} vote${maxVotes === 1 ? '' : 's'}.`)
+      setErrorMessage(`This track already has the max ${maxVotes} guess${maxVotes === 1 ? '' : 'es'}.`)
       return
     }
 
@@ -245,7 +289,8 @@ export default function Home() {
       .from('track_votes')
       .insert([{
         track_id: track.id,
-        voter_name: voterName
+        voter_name: pickedName,
+        voter_username: currentPlayerName
       }])
 
     if (error) {
@@ -257,6 +302,18 @@ export default function Home() {
     }
 
     setAddingVote(prev => ({ ...prev, [track.id]: false }))
+  }
+
+  function savePlayerName(e) {
+    e.preventDefault()
+    const name = playerNameDraft.trim()
+    if (!name) return
+
+    writePlayerNameCookie(name)
+    setPlayerName(name)
+    setPlayerNameDraft(name)
+    setEditingPlayerName(false)
+    setErrorMessage(null)
   }
 
   async function deleteVote(voteId) {
@@ -376,6 +433,54 @@ export default function Home() {
         )}
       </div>
 
+      <section className="mb-6 border border-[var(--border)] bg-[var(--card)] p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--accent)]">How this works</div>
+            <h2 className="text-xl font-semibold text-white">secret tracks, loud guesses</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--muted)]">
+              Add tracks anonymously. Then guess who picked each track — but vote for everybody besides yourself.
+              Each track gets <span className="text-white">one fewer guess than the number of tracks</span>, so no one can claim their own chaos.
+            </p>
+          </div>
+
+          <form onSubmit={savePlayerName} className="min-w-0 sm:w-72">
+            <label className="mb-2 block text-xs uppercase tracking-wide text-[var(--muted)]">Your game name</label>
+            {playerName && !editingPlayerName ? (
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1 truncate rounded-full border border-[var(--accent)] bg-[var(--background)] px-4 py-2 text-sm font-medium text-white">
+                  {playerName}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setEditingPlayerName(true); setPlayerNameDraft(playerName) }}
+                  className="px-3 py-2 text-xs text-[var(--muted)] hover:text-white"
+                >
+                  Change
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={playerNameDraft}
+                  onChange={(e) => setPlayerNameDraft(e.target.value)}
+                  placeholder="Pick a name..."
+                  className="min-w-0 flex-1 px-3 py-2 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] text-sm"
+                />
+                <button
+                  type="submit"
+                  disabled={!playerNameDraft.trim()}
+                  className="px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                >
+                  Lock in
+                </button>
+              </div>
+            )}
+          </form>
+        </div>
+      </section>
+
       {errorMessage && (
         <div className="mb-6 border border-[var(--accent)] bg-[var(--card)] p-4 text-sm text-white">
           <div className="font-medium text-[var(--accent)]">Database connection failed</div>
@@ -451,9 +556,11 @@ export default function Home() {
                             {prompt.playlist_tracks?.length > 0 ? (
                               <div className="mt-3 space-y-3">
                                 {prompt.playlist_tracks.map((track) => {
-                                  const maxVotes = prompt.playlist_tracks.length
+                                  const maxVotes = Math.max((prompt.playlist_tracks?.length || 0) - 1, 0)
                                   const votes = track.track_votes || []
+                                  const alreadyVoted = playerName && votes.some(vote => vote.voter_username?.toLowerCase() === playerName.toLowerCase())
                                   const voteLimitReached = votes.length >= maxVotes
+                                  const votingDisabled = !playerName || maxVotes === 0 || voteLimitReached || alreadyVoted
 
                                   return (
                                     <div
@@ -477,7 +584,7 @@ export default function Home() {
                                       <div className="mt-3">
                                         <div className="mb-2 flex items-center justify-between gap-3 text-xs uppercase tracking-wide text-[var(--muted)]">
                                           <span>Who picked it?</span>
-                                          <span>{votes.length}/{maxVotes} votes</span>
+                                          <span>{votes.length}/{maxVotes} guesses</span>
                                         </div>
 
                                         {votes.length > 0 && (
@@ -488,6 +595,7 @@ export default function Home() {
                                                 className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs text-white"
                                               >
                                                 <span>{vote.voter_name}</span>
+                                                <span className="text-[var(--muted)]">← guessed by {vote.voter_username || 'someone mysterious'}</span>
                                                 <button
                                                   type="button"
                                                   onClick={() => deleteVote(vote.id)}
@@ -515,17 +623,17 @@ export default function Home() {
                                                 addVote(track, maxVotes)
                                               }
                                             }}
-                                            placeholder={voteLimitReached ? 'Vote limit reached' : 'Vote for a person...'}
-                                            disabled={voteLimitReached}
+                                            placeholder={!playerName ? 'Set your game name first...' : maxVotes === 0 ? 'Need at least 2 tracks to guess' : alreadyVoted ? 'You already guessed this one' : voteLimitReached ? 'Guess limit reached' : 'Who do you think picked this?'}
+                                            disabled={votingDisabled}
                                             className="flex-1 px-3 py-2 bg-[var(--card)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 text-sm"
                                           />
                                           <button
                                             type="button"
                                             onClick={() => addVote(track, maxVotes)}
-                                            disabled={addingVote[track.id] || voteLimitReached || !voteInputs[track.id]?.trim()}
+                                            disabled={addingVote[track.id] || votingDisabled || !voteInputs[track.id]?.trim()}
                                             className="w-full sm:w-auto px-4 py-2 border border-[var(--accent)] text-white text-sm font-medium hover:bg-[var(--accent)] transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
                                           >
-                                            {addingVote[track.id] ? 'Voting...' : 'Vote'}
+                                            {addingVote[track.id] ? 'Guessing...' : 'Guess'}
                                           </button>
                                         </div>
                                       </div>
