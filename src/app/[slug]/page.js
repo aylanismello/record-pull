@@ -125,7 +125,8 @@ export default function PlaylistPage({ params }) {
       .from('playlist_tracks')
       .insert([{
         playlist_prompt_id: promptId,
-        name: trackName
+        name: trackName,
+        submitter_name: null
       }])
 
     if (error) {
