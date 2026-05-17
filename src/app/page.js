@@ -18,6 +18,11 @@ export default function Home() {
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, playlist: null })
   const [deleting, setDeleting] = useState(false)
   const [errorMessage, setErrorMessage] = useState(supabaseConfigError)
+  const [showPromptFormFor, setShowPromptFormFor] = useState(null)
+  const [promptInputs, setPromptInputs] = useState({})
+  const [addingPrompt, setAddingPrompt] = useState({})
+  const [trackInputs, setTrackInputs] = useState({})
+  const [addingTrack, setAddingTrack] = useState({})
 
   async function fetchPlaylists() {
     if (!supabase) {
@@ -149,11 +154,72 @@ export default function Home() {
       .update({ name: editName.trim() })
       .eq('id', playlistId)
 
-    if (!error) {
+    if (error) {
+      console.error('Failed to update playlist:', error)
+      setErrorMessage(error.message || 'Could not update playlist.')
+    } else {
+      setErrorMessage(null)
       cancelEdit()
       fetchPlaylists()
     }
     setUpdating(false)
+  }
+
+  async function addPrompt(e, playlist) {
+    e.preventDefault()
+    const description = promptInputs[playlist.id]?.trim()
+    if (!description || !supabase) return
+
+    setAddingPrompt(prev => ({ ...prev, [playlist.id]: true }))
+    setErrorMessage(null)
+
+    const nextOrder = playlist.playlist_prompts?.length > 0
+      ? Math.max(...playlist.playlist_prompts.map(prompt => prompt.sort_order || 0)) + 1
+      : 0
+
+    const { error } = await supabase
+      .from('playlist_prompts')
+      .insert([{
+        playlist_id: playlist.id,
+        description,
+        sort_order: nextOrder
+      }])
+
+    if (error) {
+      console.error('Failed to add prompt:', error)
+      setErrorMessage(error.message || 'Could not add prompt.')
+    } else {
+      setPromptInputs(prev => ({ ...prev, [playlist.id]: '' }))
+      setShowPromptFormFor(null)
+      fetchPlaylists()
+    }
+
+    setAddingPrompt(prev => ({ ...prev, [playlist.id]: false }))
+  }
+
+  async function addTrack(promptId) {
+    const name = trackInputs[promptId]?.trim()
+    if (!name || !supabase) return
+
+    setAddingTrack(prev => ({ ...prev, [promptId]: true }))
+    setErrorMessage(null)
+
+    const { error } = await supabase
+      .from('playlist_tracks')
+      .insert([{
+        playlist_prompt_id: promptId,
+        name
+      }])
+
+    if (error) {
+      console.error('Failed to add track:', error)
+      setErrorMessage(error.message || 'Could not add track.')
+    } else {
+      setTrackInputs(prev => ({ ...prev, [promptId]: '' }))
+      fetchPlaylists()
+    }
+
+    setAddingTrack(prev => ({ ...prev, [promptId]: false }))
   }
 
   function openDeleteModal(playlist) {
@@ -311,6 +377,33 @@ export default function Home() {
                             ) : (
                               <p className="mt-2 text-xs text-[var(--muted)]">No tracks yet.</p>
                             )}
+
+                            <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="text"
+                                value={trackInputs[prompt.id] || ''}
+                                onChange={(e) => setTrackInputs(prev => ({
+                                  ...prev,
+                                  [prompt.id]: e.target.value
+                                }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    addTrack(prompt.id)
+                                  }
+                                }}
+                                placeholder="Add a track..."
+                                className="flex-1 px-3 py-2 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] text-sm"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => addTrack(prompt.id)}
+                                disabled={addingTrack[prompt.id] || !trackInputs[prompt.id]?.trim()}
+                                className="w-full sm:w-auto px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                              >
+                                {addingTrack[prompt.id] ? '...' : 'Submit'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -321,6 +414,51 @@ export default function Home() {
                     No prompts yet.
                   </p>
                 )}
+
+                <div className="mb-4 border-t border-[var(--border)] pt-4">
+                  {showPromptFormFor === playlist.id ? (
+                    <form onSubmit={(e) => addPrompt(e, playlist)} className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                      <input
+                        type="text"
+                        value={promptInputs[playlist.id] || ''}
+                        onChange={(e) => setPromptInputs(prev => ({
+                          ...prev,
+                          [playlist.id]: e.target.value
+                        }))}
+                        placeholder="What kind of tracks are you looking for?"
+                        autoFocus
+                        className="flex-1 px-3 py-2 bg-[var(--background)] border border-[var(--border)] text-white placeholder:text-[var(--muted)] focus:outline-none focus:border-[var(--accent)] text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={addingPrompt[playlist.id] || !promptInputs[playlist.id]?.trim()}
+                          className="flex-1 sm:flex-none px-4 py-2 bg-[var(--accent)] text-white text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+                        >
+                          {addingPrompt[playlist.id] ? 'Adding...' : 'Add'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPromptFormFor(null)
+                            setPromptInputs(prev => ({ ...prev, [playlist.id]: '' }))
+                          }}
+                          className="flex-1 sm:flex-none px-4 py-2 border border-[var(--border)] text-[var(--muted)] hover:text-white transition-colors text-sm"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowPromptFormFor(playlist.id)}
+                      className="w-full sm:w-auto px-4 py-2 border border-[var(--border)] text-[var(--muted)] hover:text-white hover:border-white transition-colors text-sm"
+                    >
+                      + Add Prompt
+                    </button>
+                  )}
+                </div>
 
                 <div className="flex gap-2">
                   <button
