@@ -259,6 +259,24 @@ export default function Home() {
     setAddingVote(prev => ({ ...prev, [track.id]: false }))
   }
 
+  async function deleteVote(voteId) {
+    if (!supabase) return
+
+    setErrorMessage(null)
+
+    const { error } = await supabase
+      .from('track_votes')
+      .delete()
+      .eq('id', voteId)
+
+    if (error) {
+      console.error('Failed to delete vote:', error)
+      setErrorMessage(error.message || 'Could not delete vote.')
+    } else {
+      fetchPlaylists()
+    }
+  }
+
   function openTrackDeleteModal(track) {
     setTrackDeleteModal({ isOpen: true, track })
   }
@@ -467,9 +485,17 @@ export default function Home() {
                                             {votes.map((vote) => (
                                               <span
                                                 key={vote.id}
-                                                className="rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs text-white"
+                                                className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] px-2.5 py-1 text-xs text-white"
                                               >
-                                                {vote.voter_name}
+                                                <span>{vote.voter_name}</span>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => deleteVote(vote.id)}
+                                                  className="text-[var(--muted)] hover:text-[var(--accent)] transition-colors"
+                                                  aria-label={`Delete vote for ${vote.voter_name}`}
+                                                >
+                                                  ×
+                                                </button>
                                               </span>
                                             ))}
                                           </div>
